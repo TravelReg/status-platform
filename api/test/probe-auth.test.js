@@ -60,12 +60,21 @@ test("probe submissions with an incorrect token are rejected", async () => {
   await response.text();
 });
 
-test("a correct token reaches the protected route", async () => {
+test("a correct token and valid record reach the storage step", async () => {
   const response = await fetch(`${baseUrl}/api/probes`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${testToken}`
-    }
+      Authorization: `Bearer ${testToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      serviceId: "example-site",
+      region: "eu-north-1",
+      checkedAt: new Date().toISOString(),
+      httpStatus: 200,
+      responseTimeMs: 120,
+      success: true
+    })
   });
 
   assert.equal(response.status, 503);
@@ -73,4 +82,22 @@ test("a correct token reaches the protected route", async () => {
     (await response.json()).error,
     "probe_storage_not_configured"
   );
+});
+
+test("an authenticated invalid record returns 400", async () => {
+  const response = await fetch(`${baseUrl}/api/probes`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${testToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({})
+  });
+
+  assert.equal(response.status, 400);
+
+  const body = await response.json();
+
+  assert.equal(body.error, "invalid_probe");
+  assert.ok(body.errors.length > 0);
 });

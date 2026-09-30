@@ -5,3 +5,5 @@ export const services = [
     url: "https://example.com"
   }
 ];
+
+export const probeRegions = ["eu-north-1"];

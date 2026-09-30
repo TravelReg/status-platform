@@ -21,10 +21,24 @@ app.get("/api/services", (_req, res) => {
   });
 });
 
-app.post("/api/probes", requireProbeToken, (_req, res) => {
-  res.status(503).json({
-    error: "probe_storage_not_configured"
-  });
-});
+app.post(
+  "/api/probes",
+  requireProbeToken,
+  express.json({ limit: "16kb" }),
+  (req, res) => {
+    const errors = validateProbe(req.body);
 
-export default app;
+    if (errors.length > 0) {
+      return res.status(400).json({
+        error: "invalid_probe",
+        errors
+      });
+    }
+
+    res.status(503).json({
+      error: "probe_storage_not_configured"
+    });
+  }
+);
+
+import { validateProbe } from "./probe-validation.js";
