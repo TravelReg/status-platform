@@ -10,6 +10,8 @@ permissions:
 jobs:
   api-smoke-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+
     defaults:
       run:
         working-directory: api
@@ -27,12 +29,18 @@ jobs:
         run: npm ci
 
       - name: Start API and check HTTP response
+        shell: bash
         run: |
+          set -euo pipefail
           npm start &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
+
           for attempt in {1..10}; do
-            if curl --fail --silent --show-error http://127.0.0.1:3000/api/health\; then
+            if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:3000/api/health; then
               exit 0
             fi
             sleep 1
           done
+
           exit 1
