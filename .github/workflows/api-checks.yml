@@ -31,7 +31,7 @@ jobs:
       - name: Start API and check HTTP responses
         shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           npm start &
           api_pid=$!
           trap 'kill "$api_pid" 2>/dev/null || true' EXIT
