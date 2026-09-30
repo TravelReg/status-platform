@@ -1,6 +1,7 @@
 import express from "express";
 import { services } from "./services.js";
 import { requireProbeToken } from "./auth.js";
+import { validateProbe } from "./probe-validation.js";
 
 const app = express();
 
@@ -41,4 +42,4 @@ app.post(
   }
 );
 
-import { validateProbe } from "./probe-validation.js";
+export default app;
