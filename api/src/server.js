@@ -5,11 +5,3 @@ const port = Number(process.env.PORT ?? 3000);
 app.listen(port, "0.0.0.0", () => {
   console.log(`Status API listening on port ${port}`);
 });
-
-export const services = [
-  {
-    id: "example-site",
-    name: "Example Website",
-    url: "https://example.com"
-  }
-];
