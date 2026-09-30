@@ -47,3 +47,12 @@ output "node_role_name" {
   description = "IAM role used by the EC2 server"
   value       = aws_iam_role.node.name
 }
+
+output "ecr_repository_urls" {
+  description = "Private ECR repository URLs for application images"
+
+  value = {
+    for component, repository in aws_ecr_repository.apps :
+    component => repository.repository_url
+  }
+}
