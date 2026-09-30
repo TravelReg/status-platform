@@ -15,6 +15,7 @@ jobs:
     defaults:
       run:
         working-directory: api
+        shell: bash
 
     steps:
       - uses: actions/checkout@v6
@@ -26,22 +27,46 @@ jobs:
           cache-dependency-path: api/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci 2>&1 | tee install.log
 
       - name: Start API and check HTTP responses
-        shell: bash
         run: |
-          set -euxo pipefail
-          npm start &
+          set -euo pipefail
+          npm start > api-startup.log 2>&1 &
           api_pid=$!
           trap 'kill "$api_pid" 2>/dev/null || true' EXIT
 
           for attempt in {1..10}; do
-            if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:3000/api/health; then
-              curl --fail --silent --show-error --max-time 2 http://127.0.0.1:3000/api/services
+            printf '\nHealth check attempt %s\n' "$attempt" >> requests.log
+
+            if curl --fail-with-body --silent --show-error --max-time 2 http://127.0.0.1:3000/api/health >> requests.log 2>&1; then
+              printf '\nChecking /api/services\n' >> requests.log
+              curl --fail-with-body --silent --show-error --max-time 2 http://127.0.0.1:3000/api/services >> requests.log 2>&1
+              printf '\nBoth endpoint checks passed.\n' >> requests.log
               exit 0
             fi
+
             sleep 1
           done
 
+          printf '\nAPI did not become healthy within 10 attempts.\n' >> requests.log
           exit 1
+
+      - name: Publish diagnostic summary
+        if: always()
+        run: |
+          {
+            printf '## API check diagnostics\n\n'
+
+            for file in install.log api-startup.log requests.log; do
+              printf '### %s\n\n' "$file"
+
+              if [ -f "$file" ]; then
+                printf '```text\n'
+                cat "$file"
+                printf '\n```\n\n'
+              else
+                printf 'No log created. The preceding step may not have run.\n\n'
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
