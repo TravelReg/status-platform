@@ -53,6 +53,21 @@ k3s kubectl create namespace "$namespace" \
   --output yaml |
 k3s kubectl apply -f -
 
+if ! k3s kubectl get secret probe-auth \
+  --namespace "$namespace" >/dev/null 2>&1; then
+  echo "Creating internal probe authentication secret."
+
+  probe_token=$(openssl rand -hex 32)
+
+  k3s kubectl create secret generic probe-auth \
+    --namespace "$namespace" \
+    --from-literal=token="$probe_token"
+
+  unset probe_token
+else
+  echo "Internal probe authentication secret already exists."
+fi
+
 ecr_password=$(aws ecr get-login-password --region "$aws_region")
 
 k3s kubectl create secret docker-registry ecr-pull \

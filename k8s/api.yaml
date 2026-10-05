@@ -52,6 +52,11 @@ spec:
               value: eu-north-1
             - name: PROBE_TABLE_NAME
               value: status-platform-dev-probes
+            - name: PROBE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: probe-auth
+                  key: token
           resources:
             requests:
               cpu: 50m
