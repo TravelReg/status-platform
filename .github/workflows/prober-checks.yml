@@ -1,0 +1,35 @@
+name: Prober checks
+
+on:
+  push:
+    paths:
+      - "prober/**"
+      - ".github/workflows/prober-checks.yml"
+  pull_request:
+    paths:
+      - "prober/**"
+      - ".github/workflows/prober-checks.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    defaults:
+      run:
+        working-directory: prober
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Run prober tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover --start-directory test --verbose
