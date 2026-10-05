@@ -1,0 +1,49 @@
+#!/bin/bash
+set -euo pipefail
+exec > >(tee -a /var/log/status-platform-bootstrap.log) 2>&1
+
+if ! snap list amazon-ssm-agent >/dev/null 2>&1; then
+  snap install amazon-ssm-agent --classic
+fi
+snap start --enable amazon-ssm-agent
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get -o Acquire::Retries=5 update
+apt-get -o Acquire::Retries=5 install -y ca-certificates curl unzip
+
+if ! command -v aws >/dev/null 2>&1; then
+  curl --fail --silent --show-error --location --retry 5 \
+    https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip \
+    -o /tmp/awscliv2.zip
+
+  unzip -q /tmp/awscliv2.zip -d /tmp/awscli
+  /tmp/awscli/aws/install
+fi
+
+install -d -m 0700 /etc/rancher/k3s
+
+cat > /etc/rancher/k3s/config.yaml <<'CONFIG'
+node-name: "${node_name}"
+write-kubeconfig-mode: "0600"
+secrets-encryption: true
+CONFIG
+
+curl --fail --silent --show-error --location --retry 5 \
+  https://get.k3s.io \
+  -o /tmp/install-k3s.sh
+
+INSTALL_K3S_VERSION="${k3s_version}" sh /tmp/install-k3s.sh
+
+for attempt in $(seq 1 60); do
+  if k3s kubectl get node "${node_name}" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 5
+done
+
+k3s kubectl wait \
+  --for=condition=Ready \
+  "node/${node_name}" \
+  --timeout=300s
+
+printf 'K3s bootstrap completed successfully.\n'

@@ -56,3 +56,18 @@ output "ecr_repository_urls" {
     component => repository.repository_url
   }
 }
+
+output "instance_id" {
+  description = "EC2 instance running K3s"
+  value       = aws_instance.node.id
+}
+
+output "server_public_ip" {
+  description = "Stable public IPv4 address"
+  value       = aws_eip.node.public_ip
+}
+
+output "github_actions_role_arn" {
+  description = "IAM role assumed by GitHub Actions through OIDC"
+  value       = aws_iam_role.github_actions.arn
+}
