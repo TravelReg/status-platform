@@ -1,0 +1,83 @@
+name: Prober image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "prober/**"
+      - ".github/workflows/prober-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: eu-north-1
+  AWS_ACCOUNT_ID: "820932217554"
+  ECR_REPOSITORY: status-platform-dev-prober
+
+jobs:
+  test-build-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Run prober tests
+        working-directory: prober
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover --start-directory test --verbose
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-session-name: status-platform-prober-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          allowed-account-ids: ${{ env.AWS_ACCOUNT_ID }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image information
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          image_tag="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          image_uri="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${image_tag}"
+
+          echo "tag=$image_tag" >> "$GITHUB_OUTPUT"
+          echo "uri=$image_uri" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push prober image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./prober
+          file: ./prober/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.uri }}
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=status-platform-prober
+          cache-to: type=gha,mode=max,scope=status-platform-prober
+
+      - name: Write image summary
+        run: |
+          echo "### Prober image" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.image.outputs.uri }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
