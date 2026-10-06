@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: status-prober
+  namespace: status-platform
+  labels:
+    app: status-prober
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: status-prober
+  template:
+    metadata:
+      labels:
+        app: status-prober
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: ecr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: prober
+          image: 820932217554.dkr.ecr.eu-north-1.amazonaws.com/status-platform-dev-prober:sha-b00401c5c2b8d71bca2a7a157eddeceedc695e16-run-37392574072-1
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PROBE_API_URL
+              value: http://status-api.status-platform.svc.cluster.local/api/probes
+            - name: PROBE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: probe-auth
+                  key: token
+            - name: PROBE_REGION
+              value: eu-north-1
+            - name: PROBE_INTERVAL_SECONDS
+              value: "60"
+            - name: PROBE_TIMEOUT_SECONDS
+              value: "5"
+            - name: PROBE_TARGETS_JSON
+              value: >-
+                [{"serviceId":"example-site","url":"https://example.com"}]
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 150m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
