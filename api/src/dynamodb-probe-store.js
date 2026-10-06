@@ -1,11 +1,23 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
-  PutCommand
+  PutCommand,
+  QueryCommand
 } from "@aws-sdk/lib-dynamodb";
 
 const DEFAULT_RETENTION_DAYS = 30;
 const SECONDS_PER_DAY = 86400;
+
+function mapProbeItem(item) {
+  return {
+    serviceId: item.ServiceID,
+    region: item.Region,
+    checkedAt: item.Timestamp,
+    httpStatus: item.HTTPStatus ?? null,
+    responseTimeMs: item.ResponseTimeMs,
+    success: item.Success
+  };
+}
 
 export function createDynamoProbeStore({
   tableName,
@@ -24,9 +36,7 @@ export function createDynamoProbeStore({
   const client =
     documentClient ??
     DynamoDBDocumentClient.from(
-      new DynamoDBClient({
-        region
-      }),
+      new DynamoDBClient({ region }),
       {
         marshallOptions: {
           removeUndefinedValues: true
@@ -55,14 +65,26 @@ export function createDynamoProbeStore({
         })
       );
 
-      return {
-        serviceId: probe.serviceId,
-        region: probe.region,
-        checkedAt: probe.checkedAt,
-        httpStatus: probe.httpStatus,
-        responseTimeMs: probe.responseTimeMs,
-        success: probe.success
-      };
+      return { ...probe };
+    },
+
+    async listRecent(serviceId, limit = 100) {
+      const response = await client.send(
+        new QueryCommand({
+          TableName: tableName,
+          KeyConditionExpression: "#serviceId = :serviceId",
+          ExpressionAttributeNames: {
+            "#serviceId": "ServiceID"
+          },
+          ExpressionAttributeValues: {
+            ":serviceId": serviceId
+          },
+          ScanIndexForward: false,
+          Limit: limit
+        })
+      );
+
+      return (response.Items ?? []).map(mapProbeItem);
     }
   };
 }

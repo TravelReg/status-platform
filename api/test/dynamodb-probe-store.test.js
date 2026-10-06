@@ -45,3 +45,59 @@ test("stores a validated probe using the DynamoDB table schema", async () => {
 
   assert.deepEqual(result, probe);
 });
+
+test("queries recent probes newest first", async () => {
+  const commands = [];
+
+  const documentClient = {
+    async send(command) {
+      commands.push(command);
+
+      return {
+        Items: [
+          {
+            ServiceID: "example-site",
+            Timestamp: "2026-10-06T01:01:00.000Z",
+            Region: "eu-north-1",
+            HTTPStatus: 200,
+            ResponseTimeMs: 110,
+            Success: true
+          }
+        ]
+      };
+    }
+  };
+
+  const store = createDynamoProbeStore({
+    tableName: "test-probes",
+    region: "eu-north-1",
+    documentClient
+  });
+
+  const checks = await store.listRecent("example-site", 25);
+
+  assert.equal(commands.length, 1);
+  assert.deepEqual(commands[0].input, {
+    TableName: "test-probes",
+    KeyConditionExpression: "#serviceId = :serviceId",
+    ExpressionAttributeNames: {
+      "#serviceId": "ServiceID"
+    },
+    ExpressionAttributeValues: {
+      ":serviceId": "example-site"
+    },
+    ScanIndexForward: false,
+    Limit: 25
+  });
+
+  assert.deepEqual(checks, [
+    {
+      serviceId: "example-site",
+      region: "eu-north-1",
+      checkedAt: "2026-10-06T01:01:00.000Z",
+      httpStatus: 200,
+      responseTimeMs: 110,
+      success: true
+    }
+  ]);
+});

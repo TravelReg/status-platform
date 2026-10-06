@@ -2,6 +2,7 @@ import express from "express";
 import { services } from "./services.js";
 import { requireProbeToken } from "./auth.js";
 import { validateProbe } from "./probe-validation.js";
+import { calculateStatus } from "./status.js";
 
 export function createApp({ probeStore = null } = {}) {
   const app = express();
@@ -13,14 +14,90 @@ export function createApp({ probeStore = null } = {}) {
     });
   });
 
-  app.get("/api/services", (_req, res) => {
-    res.json({
-      services: services.map((service) => ({
-        ...service,
-        status: "unknown",
-        lastCheckedAt: null
-      }))
-    });
+  app.get("/api/services", async (_req, res) => {
+    if (!probeStore) {
+      return res.json({
+        services: services.map((service) => ({
+          ...service,
+          status: "unknown",
+          lastCheckedAt: null
+        }))
+      });
+    }
+
+    try {
+      const serviceStatuses = await Promise.all(
+        services.map(async (service) => {
+          const checks = await probeStore.listRecent(service.id, 100);
+
+          return {
+            ...service,
+            status: calculateStatus(checks),
+            lastCheckedAt: checks[0]?.checkedAt ?? null
+          };
+        })
+      );
+
+      return res.json({
+        services: serviceStatuses
+      });
+    } catch (error) {
+      console.error("Failed to retrieve service status.", error);
+
+      return res.status(503).json({
+        error: "service_status_unavailable"
+      });
+    }
+  });
+
+  app.get("/api/services/:serviceId/history", async (req, res) => {
+    const service = services.find(
+      (candidate) => candidate.id === req.params.serviceId
+    );
+
+    if (!service) {
+      return res.status(404).json({
+        error: "service_not_found"
+      });
+    }
+
+    const requestedLimit =
+      req.query.limit === undefined ? 50 : Number(req.query.limit);
+
+    if (
+      !Number.isInteger(requestedLimit) ||
+      requestedLimit < 1 ||
+      requestedLimit > 100
+    ) {
+      return res.status(400).json({
+        error: "invalid_limit",
+        message: "The history limit must be an integer from 1 to 100."
+      });
+    }
+
+    if (!probeStore) {
+      return res.status(503).json({
+        error: "probe_storage_not_configured"
+      });
+    }
+
+    try {
+      const checks = await probeStore.listRecent(
+        service.id,
+        requestedLimit
+      );
+
+      return res.json({
+        service,
+        checks
+      });
+    } catch (error) {
+      console.error("Failed to retrieve probe history.", error);
+
+      return res.status(503).json({
+        error: "probe_history_unavailable"
+      });
+    }
   });
 
   app.post(
