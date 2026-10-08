@@ -1,0 +1,5 @@
+aws_account_id       = "820932217554"
+ubuntu_ami_id        = "ami-0769f265f707fecc8"
+k3s_version          = "v1.36.4+k3s1"
+github_owner_id      = "186998767"
+github_repository_id = "1397980879"
