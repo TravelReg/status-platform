@@ -3,8 +3,12 @@ import { services } from "./services.js";
 import { requireProbeToken } from "./auth.js";
 import { validateProbe } from "./probe-validation.js";
 import { calculateStatus } from "./status.js";
+import { createIncidentRouter } from "./incidents-router.js";
 
-export function createApp({ probeStore = null } = {}) {
+export function createApp({
+  probeStore = null,
+  incidentStore = null
+} = {}) {
   const app = express();
 
   app.get("/api/health", (_req, res) => {
@@ -99,6 +103,13 @@ export function createApp({ probeStore = null } = {}) {
       });
     }
   });
+
+  app.use(
+    "/api",
+    createIncidentRouter({
+      incidentStore
+    })
+  );
 
   app.post(
     "/api/probes",
