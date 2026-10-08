@@ -57,6 +57,14 @@ spec:
                 secretKeyRef:
                   name: probe-auth
                   key: token
+            - name: INCIDENT_TABLE_NAME
+              value: status-platform-dev-incidents
+            - name: ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: admin-auth
+                  key: token
+
           resources:
             requests:
               cpu: 50m

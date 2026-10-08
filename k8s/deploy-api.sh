@@ -68,6 +68,21 @@ else
   echo "Internal probe authentication secret already exists."
 fi
 
+if ! k3s kubectl get secret admin-auth \
+  --namespace "$namespace" >/dev/null 2>&1; then
+  echo "Creating administrator authentication secret."
+
+  admin_token=$(openssl rand -hex 32)
+
+  k3s kubectl create secret generic admin-auth \
+    --namespace "$namespace" \
+    --from-literal=token="$admin_token"
+
+  unset admin_token
+else
+  echo "Administrator authentication secret already exists."
+fi
+
 ecr_password=$(aws ecr get-login-password --region "$aws_region")
 
 k3s kubectl create secret docker-registry ecr-pull \
