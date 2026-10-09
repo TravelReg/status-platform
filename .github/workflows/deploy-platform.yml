@@ -1,0 +1,130 @@
+name: Deploy platform configuration
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - k8s/cert-manager.yaml
+      - k8s/ingress.yaml
+      - k8s/deploy-platform.sh
+      - .github/workflows/deploy-platform.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: status-platform-configuration-deployment
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-north-1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-session-name: status-platform-config-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          allowed-account-ids: "820932217554"
+
+      - name: Find the K3s EC2 instance
+        id: node
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          instance_ids=$(aws ec2 describe-instances \
+            --region "$AWS_REGION" \
+            --filters \
+              "Name=tag:Name,Values=status-platform-dev-node" \
+              "Name=instance-state-name,Values=running" \
+            --query 'Reservations[].Instances[].InstanceId' \
+            --output text)
+
+          read -r -a instances <<< "$instance_ids"
+
+          if [ "${#instances[@]}" -ne 1 ]; then
+            echo "Expected exactly one running K3s instance."
+            echo "Found: ${#instances[@]}"
+            exit 1
+          fi
+
+          echo "instance_id=${instances[0]}" >> "$GITHUB_OUTPUT"
+          echo "Deployment target: ${instances[0]}"
+
+      - name: Deploy platform configuration through Systems Manager
+        shell: bash
+        env:
+          INSTANCE_ID: ${{ steps.node.outputs.instance_id }}
+        run: |
+          set -euo pipefail
+
+          parameters=$(jq -cn \
+            '{
+              commands: [
+                "curl --fail --silent --show-error --location --retry 5 https://raw.githubusercontent.com/TravelReg/status-platform/main/k8s/deploy-platform.sh --output /tmp/status-platform-deploy-platform.sh",
+                "chmod 700 /tmp/status-platform-deploy-platform.sh",
+                "sudo /tmp/status-platform-deploy-platform.sh"
+              ]
+            }')
+
+          command_id=$(aws ssm send-command \
+            --region "$AWS_REGION" \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "Deploy status platform Kubernetes configuration" \
+            --parameters "$parameters" \
+            --query 'Command.CommandId' \
+            --output text)
+
+          echo "SSM command ID: $command_id"
+
+          command_status="Pending"
+
+          for attempt in {1..120}; do
+            command_status=$(aws ssm get-command-invocation \
+              --region "$AWS_REGION" \
+              --command-id "$command_id" \
+              --instance-id "$INSTANCE_ID" \
+              --query 'Status' \
+              --output text 2>/dev/null || true)
+
+            case "$command_status" in
+              Success)
+                break
+                ;;
+              Failed|Cancelled|TimedOut|Cancelling)
+                break
+                ;;
+            esac
+
+            echo "Deployment status: ${command_status:-Pending}"
+            sleep 5
+          done
+
+          echo "SSM command output:"
+
+          aws ssm get-command-invocation \
+            --region "$AWS_REGION" \
+            --command-id "$command_id" \
+            --instance-id "$INSTANCE_ID" \
+            --query '{
+              Status: Status,
+              Output: StandardOutputContent,
+              Error: StandardErrorContent
+            }' \
+            --output json
+
+          if [ "$command_status" != "Success" ]; then
+            echo "Platform configuration deployment failed with status: $command_status"
+            exit 1
+          fi
