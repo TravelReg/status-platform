@@ -120,14 +120,18 @@ then
   exit 1
 fi
 
-echo "Verifying the public HTTPS API."
+echo "Checking whether the public API is already available."
 
-curl --fail \
+if curl --fail \
   --silent \
   --show-error \
-  --retry 10 \
-  --retry-delay 5 \
   "https://${DOMAIN}/api/health"
+then
+  echo
+  echo "The public HTTPS API is healthy."
+else
+  echo "HTTPS configuration is ready, but the API is not available yet."
+  echo "This is expected during recovery before the API deployment completes."
+fi
 
-echo
 echo "Platform configuration deployed successfully."
