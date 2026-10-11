@@ -1,99 +1,96 @@
 # Status Platform
 
-A server-hosted status and uptime platform running on K3s in AWS.
+Status Platform is a small, self-hosted uptime monitor and public status page. A Python worker checks the configured services, the Node.js API stores and evaluates those checks, and a React dashboard turns the results into a simple view of current availability, response times, and incidents.
 
-Public dashboard: [https://status.travelregger.com](https://status.travelregger.com)
+The live dashboard is available at [status.travelregger.com](https://status.travelregger.com).
 
-The development computer is used only for Git, Terraform, AWS CLI, and administration. No application component is hosted locally.
+This project is intentionally deployment-focused. The application runs on a single K3s node in AWS; the development machine is only used for source control, Terraform, the AWS CLI, and administration.
 
-## Architecture
+## How it works
 
 ```mermaid
-flowchart TB
-    Visitor["Status-page visitor"] --> DNS["Cloudflare DNS"]
-    DNS --> Traefik["Traefik and HTTPS"]
-
-    GitHub["GitHub Actions"] --> ECR["Amazon ECR"]
-    GitHub --> SSM["AWS Systems Manager"]
-    ECR --> K3s
-    SSM --> K3s
-
-    subgraph EC2["AWS EC2"]
-        K3s["Single-node K3s cluster"]
-        Traefik --> Frontend["React frontend"]
-        Traefik --> API["Node.js API"]
-        Prober["Python prober"] --> API
-    end
-
-    API --> DynamoDB["Amazon DynamoDB"]
+flowchart LR
+    Prober["Python prober"] -->|health checks| Services["Monitored services"]
+    Prober -->|authenticated results| API["Node.js API"]
+    API <--> DynamoDB["DynamoDB"]
+    Dashboard["React dashboard"] -->|status, history, incidents| API
+    Visitor["Visitor"] --> Traefik["Traefik + HTTPS"]
+    Traefik --> Dashboard
+    Traefik --> API
 ```
 
-## Components
+The prober runs every 60 seconds and sends each result to the API. The API keeps probe history in DynamoDB and derives a stable service state from consecutive checks. The dashboard refreshes every 30 seconds and combines those service states with manually managed incidents.
 
-| Component | Technology | Purpose |
-|---|---|---|
-| Frontend | React, Vite, Nginx | Public status dashboard |
-| API | Node.js, Express | Services, probe history, and incidents |
-| Prober | Python | Runs health checks every 60 seconds |
-| Orchestration | K3s | Runs the containers on EC2 |
-| Ingress | Traefik | Routes public HTTP and HTTPS traffic |
-| Certificates | cert-manager, Let's Encrypt | Issues and renews TLS certificates |
-| Database | DynamoDB | Stores probe history and incidents |
-| Container registry | Amazon ECR | Stores application images |
-| Infrastructure | Terraform | Provisions AWS resources |
-| CI/CD | GitHub Actions | Tests, builds, publishes, and deploys |
-| Remote administration | AWS Systems Manager | Manages EC2 without SSH |
+Everything runs as containers on a single-node K3s cluster. Traefik handles ingress, cert-manager manages the Let's Encrypt certificate, and GitHub Actions builds and deploys immutable images from Amazon ECR. Deployments reach the server through AWS Systems Manager, so neither SSH nor the Kubernetes API is exposed publicly.
 
-## Status behavior
+## Monitoring rules
 
-- Checks run every 60 seconds.
-- Requests time out after 5 seconds.
-- HTTP 200–399 is successful.
-- HTTP 400–599, connection errors, and timeouts are failures.
-- Two consecutive failures mark a service down.
-- Two consecutive successes mark a service operational.
-- Results older than three minutes produce an unknown status.
+- A check times out after 5 seconds.
+- HTTP 200–399 is a success; HTTP errors, connection errors, and timeouts are failures.
+- Two consecutive failures mark a service as down.
+- Two consecutive successes bring it back to operational.
+- A service is shown as unknown until it has a result, or when its latest result is more than three minutes old.
 
-The complete rules are in [docs/behavior.md](docs/behavior.md).
+Incidents are managed separately from automatic checks. This allows an operator to explain an outage, post updates, and resolve the incident without changing the underlying probe history. The exact rules are documented in [docs/behavior.md](docs/behavior.md).
 
-## Public API
+## Project layout
 
-| Method | Endpoint | Purpose |
-|---|---|---|
-| GET | `/api/health` | API health check |
-| GET | `/api/services` | Current service states |
-| GET | `/api/services/:serviceId/history` | Recent probe history |
-| GET | `/api/incidents` | Public incident history |
+| Path | What lives there |
+|---|---|
+| `api/` | Express API, DynamoDB stores, status rules, and incident management |
+| `frontend/` | React/Vite dashboard served by Nginx |
+| `prober/` | Dependency-free Python monitoring worker |
+| `k8s/` | K3s workloads, ingress, TLS, and deployment scripts |
+| `terraform/` | AWS networking, EC2, DynamoDB, ECR, IAM, and GitHub OIDC |
+| `.github/workflows/` | Test, image-build, and deployment pipelines |
+| `docs/` | Behavior notes and the production operations runbook |
 
-Probe submission and incident-management routes require bearer-token authentication.
+The monitored services are currently defined in two places: `api/src/services.js` controls what the public API displays, while `PROBE_TARGETS_JSON` in `k8s/prober.yaml` controls what the worker checks. Keep their service IDs in sync when adding or removing a target.
 
-## Repository structure
+## Working on the project
 
-```text
-api/                 Node.js API
-frontend/            React status dashboard
-prober/              Python monitoring worker
-terraform/           AWS infrastructure
-k8s/                 Kubernetes manifests and deployment scripts
-.github/workflows/   CI/CD pipelines
-docs/                Behavior and operational documentation
+You will need Node.js 24 and Python 3.13 to run the same checks as CI. The API and frontend keep their dependencies separate:
+
+```bash
+npm --prefix api ci
+npm --prefix frontend ci
 ```
 
-## Deployment automation
+Run the test suites and build the dashboard with:
 
-| Change | Build workflow | Deployment workflow |
-|---|---|---|
-| API | API image | Deploy API |
-| Prober | Prober image | Deploy prober |
-| Frontend | Frontend image | Deploy frontend |
-| TLS or ingress | Not required | Deploy platform configuration |
+```bash
+node --test api/test/*.test.js
+npm --prefix frontend test
+npm --prefix frontend run build
+PYTHONPATH=prober/src python3 -m unittest discover \
+  --start-directory prober/test \
+  --verbose
+```
 
-Application images use immutable tags containing the commit SHA and GitHub Actions run ID. GitHub authenticates to AWS through OpenID Connect instead of stored AWS access keys.
+The API can be started locally with `npm --prefix api start`. Without DynamoDB table names it still exposes `/api/health` and returns the configured services with an `unknown` state; history and incident storage require AWS credentials and the relevant table environment variables.
 
-Deployments reach the private Kubernetes control plane through AWS Systems Manager. Kubernetes and SSH ports are not exposed publicly.
+## API overview
 
-## Current scope
+| Method | Route | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/health` | Public | API health check |
+| `GET` | `/api/services` | Public | Current state of every service |
+| `GET` | `/api/services/:serviceId/history` | Public | Recent probe results |
+| `GET` | `/api/incidents` | Public | Current and past incidents |
+| `POST` | `/api/probes` | Probe token | Store a check result |
+| `POST` | `/api/admin/incidents` | Admin token | Create an incident |
+| `PATCH` | `/api/admin/incidents/:incidentId` | Admin token | Update or resolve an incident |
 
-This environment uses one EC2 instance and one probe region. It is suitable for a portfolio or small deployment, but it is not highly available. An EC2 or Availability Zone failure can temporarily interrupt the platform until the node is restored.
+Probe and admin tokens are deliberately separate. Public routes are read-only.
 
-See [docs/operations.md](docs/operations.md) for deployment, troubleshooting, recovery, and teardown procedures.
+## Infrastructure and deployment
+
+Terraform provisions the AWS foundation: a VPC, EC2 instance with a stable Elastic IP, DynamoDB tables, private ECR repositories, IAM roles, and GitHub's OpenID Connect trust. K3s, Traefik, and the SSM agent are prepared on the instance during boot.
+
+Changes to the API, frontend, or prober are tested and built by their own GitHub Actions workflows. A successful image build automatically starts the matching deployment workflow, which verifies the image, sends the deployment through Systems Manager, and waits for the Kubernetes rollout to finish. Ingress and certificate changes use the separate platform deployment workflow.
+
+For provisioning, manual deployments, log inspection, certificate checks, recovery, and teardown, use the [operations runbook](docs/operations.md). It also records the required secrets and the checks to perform after a deployment.
+
+## Current limits
+
+This is a compact deployment, not a highly available one. The K3s control plane and all workloads share one EC2 instance in one Availability Zone, and checks currently run from one region. DynamoDB keeps probe and incident data outside the node, so replacing the server does not remove history, but an instance or Availability Zone failure can still interrupt the dashboard until recovery completes.
