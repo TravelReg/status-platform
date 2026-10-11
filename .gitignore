@@ -5,3 +5,8 @@ node_modules/
 *.tfstate.*
 terraform/terraform.tfvars
 *.tfplan
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
