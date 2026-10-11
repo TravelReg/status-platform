@@ -4,6 +4,14 @@ Status Platform is a small, self-hosted uptime monitor and public status page. A
 
 The live dashboard is available at [status.travelregger.com](https://status.travelregger.com).
 
+<p align="center">
+  <a href="https://status.travelregger.com">
+    <img src="docs/assets/status-dashboard.png" alt="Status Platform dashboard showing all systems operational, recent health checks, and a resolved incident" width="100%">
+  </a>
+</p>
+
+<p align="center"><sub>The live dashboard brings service health, response history, and incident updates into one view.</sub></p>
+
 This project is intentionally deployment-focused. The application runs on a single K3s node in AWS; the development machine is only used for source control, Terraform, the AWS CLI, and administration.
 
 ## How it works
